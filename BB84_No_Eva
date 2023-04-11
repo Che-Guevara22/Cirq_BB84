@@ -1,0 +1,115 @@
+import cirq
+import math
+
+def main():
+    qc = QPU()
+    qc.reset(3)
+    a = 0x1
+    fiber = 0x2
+    b = 0x4
+
+    # Генерируем 2 случайных бита
+    send_had = random_bit()
+    send_value = random_bit()
+
+    # Подготовка кубита Алисы
+    if send_value:
+        qc.x(a)
+    if send_had:
+        qc.had(a)
+
+    # Отправка кубита на линию связи
+    qc.exchange(fiber, a)
+
+    # Получение Бобом кубита
+    recv_had = random_bit()
+    qc.exchange(fiber, b)
+    if recv_had:
+        qc.had(b)
+    qc.read(b, 'recv_val')
+    
+    result = qc.run() # Запуск квантовой схемы    
+    
+    recv_val = 1 if result.measurements['recv_val'][0] else 0
+
+    # На этом этапе происходит связь Алисы и Боба по классическому каналу связи
+    
+    if (send_had == recv_had): # Если базисы совпали
+        qc.draw() # Прорисовка схемы
+        print(send_value, recv_val)
+        if (send_value != recv_val):
+            print('Caught a spy!')
+        else:
+            print('Its OK!')
+    else:
+    	print('Incorrect basis')
+
+# Функция генерации случайного бита
+def random_bit():
+    rng = QPU()
+    rng.reset(1)
+    rng.had()
+    rng.read()
+    result = rng.run()
+    bit = 1 if result.measurements['result'][0] else 0
+    return bit
+
+
+######################################################################
+## Класс QPU (Quantum Process Unit)
+class QPU:
+    def __init__(self):
+        self.circuit = cirq.Circuit()
+        self.simulator = cirq.Simulator()
+        self.qubits = None
+
+    def reset(self, num_qubits):
+        self.qubits = [cirq.GridQubit(i, 0) for i in range(num_qubits)]
+
+    def mask_to_list(self, mask):
+        return [q for i,q in enumerate(self.qubits) if (1 << i) & mask]
+
+    def had(self, target_mask=~0):
+        target = self.mask_to_list(target_mask)
+        self.circuit.append(cirq.H.on_each(*target))
+
+    def x(self, target_mask=~0):
+        target = self.mask_to_list(target_mask)
+        self.circuit.append(cirq.X.on_each(*target))
+
+    def cnot(self, target_mask, control_mask):
+        target = self.mask_to_list(target_mask)
+        control = self.mask_to_list(control_mask)
+        self.circuit.append(cirq.CNOT.on(control[0], target[0]))
+
+    def exchange(self, q0_mask, q1_mask):
+        # Construct SWAP per Figure 3-21 in the book
+        self.cnot(q0_mask, q1_mask)
+        self.cnot(q1_mask, q0_mask)
+        self.cnot(q0_mask, q1_mask)
+
+    def phase(self, theta_degrees, target_mask=~0):
+        target = self.mask_to_list(target_mask)
+        theta_radians = theta_degrees * math.pi / 180.0
+        self.circuit.append(cirq.Rz(theta_radians).on_each(*target))
+
+    def rootnot(self, target_mask=~0):
+        sqrt_x = cirq.X**0.5
+        target = self.mask_to_list(target_mask)
+        self.circuit.append(sqrt_x.on_each(*target))
+
+    def read(self, target_mask=~0, key=None):
+        if key is None:
+            key = 'result'
+        target = self.mask_to_list(target_mask)
+        self.circuit.append(cirq.measure(*target, key=key))
+
+    def draw(self):
+        print('Circuit:\n{}'.format(self.circuit))
+
+    def run(self):
+        return self.simulator.simulate(self.circuit)
+
+
+if __name__ == '__main__':
+    main()
